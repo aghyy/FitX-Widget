@@ -1,24 +1,26 @@
 // =============== SETTINGS ===============
 const STUDIO_URL = "https://www.fitx.de/fitnessstudios/karlsruhe-oststadt";
 
-const FITX_ORANGE    = new Color("#ff6a00");
-const FITX_DARK_BG   = new Color("#101010");
-const GRID_COLOR     = new Color("#333333");
-const TEXT_PRIMARY   = Color.white();
+const FITX_ORANGE = new Color("#ff6a00");
+const FITX_DARK_BG = new Color("#101010");
+const GRID_COLOR = new Color("#333333");
+const TEXT_PRIMARY = Color.white();
 const TEXT_SECONDARY = new Color("#aaaaaa");
-const CHIP_BG        = new Color("#222222");
+const CHIP_BG = new Color("#222222");
 
-// Logo source (PNG preview of official SVG)
-const FITX_LOGO_URL =
-  "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Logo_FitX_Deutschland_GmbH.svg/512px-Logo_FitX_Deutschland_GmbH.svg.png";
-
+// Logo source
+const FITX_LOGO_URL = "https://raw.githubusercontent.com/aghyy/FitX-Widget/main/public/fitx.png";
 
 // =============== HELPERS ===============
 function studioNameFromUrl(url) {
-  let slug = url.split("/").filter(p => p).pop() || "Unknown";
+  let slug =
+    url
+      .split("/")
+      .filter((p) => p)
+      .pop() || "Unknown";
   return slug
     .split("-")
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 }
 
@@ -26,7 +28,7 @@ function extractSeriesByAttr(html, attrName) {
   const patterns = [
     new RegExp(attrName + '="(\\[.*?\\])"'),
     new RegExp(attrName + "='(\\[.*?\\])'"),
-    new RegExp(attrName + "=&quot;(\\[.*?\\])&quot;")
+    new RegExp(attrName + "=&quot;(\\[.*?\\])&quot;"),
   ];
   for (let re of patterns) {
     let m = html.match(re);
@@ -62,7 +64,7 @@ function extractSeriesPair(html) {
 
 function statusLabel(pct) {
   if (pct == null || isNaN(pct)) return "No data";
-  if (pct < 25) return "Not busy";
+  if (pct < 30) return "Not busy";
   if (pct < 60) return "Moderately busy";
   if (pct < 85) return "Busy";
   return "Very busy";
@@ -70,7 +72,7 @@ function statusLabel(pct) {
 
 function statusEmoji(pct) {
   if (pct == null || isNaN(pct)) return "⚪️";
-  if (pct < 25) return "🟢";
+  if (pct < 30) return "🟢";
   if (pct < 60) return "🟡";
   if (pct < 85) return "🟠";
   return "🔴";
@@ -83,31 +85,47 @@ function currentDayRatio() {
 }
 
 // Chart builder
-function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
+// lineEndIndex = index of current realtime value (Y)
+// nowRatio     = 0..1 position of "now" along the X axis
+function buildChart(
+  actualSeries,
+  forecastSeries,
+  width,
+  height,
+  lineEndIndex,
+  nowRatio
+) {
   let ctx = new DrawContext();
   ctx.size = new Size(width, height);
   ctx.opaque = false;
   ctx.respectScreenScale = true;
 
-  // internal padding tuned for smaller chart
-  const padLeft   = 1;
-  const padRight  = 4;
-  const padTop    = 2;
+  const padLeft = 1;
+  const padRight = 4;
+  const padTop = 2;
   const padBottom = 14;
 
-  const left   = padLeft;
-  const right  = width - padRight;
-  const top    = padTop;
+  const left = padLeft;
+  const right = width - padRight;
+  const top = padTop;
   const bottom = height - padBottom;
 
-  const plotWidth  = right - left;
+  const plotWidth = right - left;
   const plotHeight = bottom - top;
-  const maxVal     = 100;
+  const maxVal = 100;
 
-  function xForIndex(i, count) {
+  const clampedNowRatio = Math.max(0, Math.min(1, nowRatio));
+
+  function xForForecast(i, count) {
     if (count <= 1) return left;
     let t = i / (count - 1);
     return left + t * plotWidth;
+  }
+
+  function xForRealtime(i, endIndex) {
+    if (endIndex <= 0) return left;
+    let t = i / endIndex; // 0..1 over the realtime part
+    return left + t * (plotWidth * clampedNowRatio);
   }
 
   function yForValue(v) {
@@ -120,7 +138,7 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
   // Grid
   ctx.setStrokeColor(GRID_COLOR);
   ctx.setLineWidth(1);
-  [0, 50, 100].forEach(val => {
+  [0, 50, 100].forEach((val) => {
     let y = yForValue(val);
     let p = new Path();
     p.move(new Point(left, y));
@@ -129,12 +147,12 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
     ctx.strokePath();
   });
 
-  // Forecast area
+  // Forecast area (full width)
   if (forecastSeries && forecastSeries.length > 1) {
     let area = new Path();
     area.move(new Point(left, bottom));
     for (let i = 0; i < forecastSeries.length; i++) {
-      let x = xForIndex(i, forecastSeries.length);
+      let x = xForForecast(i, forecastSeries.length);
       let y = yForValue(Number(forecastSeries[i]));
       area.addLine(new Point(x, y));
     }
@@ -145,18 +163,18 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
     ctx.fillPath();
   }
 
-  // Realtime line
+  // Realtime line (only up to "now", using lineEndIndex + nowRatio)
   if (
     actualSeries &&
     actualSeries.length > 1 &&
-    typeof currentIndex === "number" &&
-    currentIndex >= 0
+    typeof lineEndIndex === "number" &&
+    lineEndIndex >= 0
   ) {
-    const maxIdx = Math.min(currentIndex, actualSeries.length - 1);
-    if (maxIdx >= 1) {
+    const endIdx = Math.min(lineEndIndex, actualSeries.length - 1);
+    if (endIdx >= 1) {
       let line = new Path();
-      for (let i = 0; i <= maxIdx; i++) {
-        let x = xForIndex(i, actualSeries.length);
+      for (let i = 0; i <= endIdx; i++) {
+        let x = xForRealtime(i, endIdx);
         let y = yForValue(Number(actualSeries[i]));
         if (i === 0) line.move(new Point(x, y));
         else line.addLine(new Point(x, y));
@@ -166,9 +184,11 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
       ctx.setLineWidth(2);
       ctx.strokePath();
     }
+  }
 
-    // Now-line
-    let xNow = xForIndex(maxIdx, actualSeries.length);
+  // Vertical "now" line at time position (independent of index)
+  {
+    let xNow = left + clampedNowRatio * plotWidth;
     let nowPath = new Path();
     nowPath.move(new Point(xNow, top));
     nowPath.addLine(new Point(xNow, bottom));
@@ -211,14 +231,13 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
   return ctx.getImage();
 }
 
-
 // =============== FETCH DATA ===============
 let mainStudio = {
   name: studioNameFromUrl(STUDIO_URL),
   currentPct: null,
   status: "No data",
   actualSeries: null,
-  forecastSeries: null
+  forecastSeries: null,
 };
 
 try {
@@ -231,51 +250,59 @@ try {
   let forecast = pair.forecast;
 
   if (actual && actual.length > 0) {
-    let current = Number(actual[actual.length - 1]);
-    mainStudio.currentPct     = isNaN(current) ? null : current;
-    mainStudio.status         = statusLabel(current);
-    mainStudio.actualSeries   = actual;
+    let lastIdx = actual.length - 1;
+
+    // Index of the current realtime value.
+    // Here we assume 1 value per hour starting at midnight.
+    let now = new Date();
+    let hour = now.getHours(); // 0..23
+    let currentIndex = Math.min(lastIdx, hour);
+
+    let current = Number(actual[currentIndex]);
+
+    mainStudio.currentIndex = currentIndex; // index for realtime data
+    mainStudio.nowRatio = currentDayRatio(); // 0..1, for X position
+    mainStudio.currentPct = isNaN(current) ? null : current;
+    mainStudio.status = statusLabel(mainStudio.currentPct);
+    mainStudio.actualSeries = actual;
     mainStudio.forecastSeries = forecast;
   }
 } catch (e) {
   mainStudio.status = "Error";
 }
 
-
 // =============== BUILD WIDGET ===============
 let widget = new ListWidget();
 
-// Vertical space + slight right shift
 widget.setPadding(30, 29, 30, 17);
 widget.backgroundColor = FITX_DARK_BG;
 
-
-// ---- HEADER ROW (logo + titles on left, percentage on right) ----
+// ---- HEADER ROW ----
 let headerRow = widget.addStack();
 headerRow.layoutHorizontally();
 headerRow.centerAlignContent();
 
-// Left block: logo + titles
-let headerLeft = headerRow.addStack();
-headerLeft.layoutHorizontally();
+let logoWrapper = headerRow.addStack();
+logoWrapper.layoutHorizontally();
 
-// Logo
+logoWrapper.setPadding(0, -3, 0, 0);
+
 try {
   let logoReq = new Request(FITX_LOGO_URL);
   let logoImg = await logoReq.loadImage();
-  let logoView = headerLeft.addImage(logoImg);
+  let logoView = logoWrapper.addImage(logoImg);
   logoView.imageSize = new Size(64, 28);
   logoView.cornerRadius = 4;
 } catch (e) {
-  let logoText = headerLeft.addText("FITX");
+  let logoText = logoWrapper.addText("FITX");
   logoText.font = Font.heavySystemFont(22);
   logoText.textColor = FITX_ORANGE;
 }
 
-headerLeft.addSpacer(8);
+headerRow.addSpacer(8);
 
-// Titles
-let titleStack = headerLeft.addStack();
+// TITLES
+let titleStack = headerRow.addStack();
 titleStack.layoutVertically();
 
 let title = titleStack.addText("Current Capacity");
@@ -286,39 +313,42 @@ let subTitle = titleStack.addText(mainStudio.name);
 subTitle.font = Font.systemFont(11);
 subTitle.textColor = TEXT_SECONDARY;
 
-// Right side: percentage
+// % on the right
 headerRow.addSpacer();
 
 let pctLabel =
   mainStudio.currentPct == null
     ? "–"
     : `${Math.round(mainStudio.currentPct)} %`;
-
 let pctText = headerRow.addText(pctLabel);
 pctText.font = Font.boldSystemFont(16);
 pctText.textColor = FITX_ORANGE;
 
 widget.addSpacer(8);
 
-
 // ---- CHART ----
 let model = Device.model();
 let isPad = model.includes("iPad");
 
-let chartWidth  = isPad ? 350 : 335;
-let chartHeight = 85;
-
 if (mainStudio.actualSeries && mainStudio.actualSeries.length > 1) {
-  let ratio = currentDayRatio();
-  let lastIdx = mainStudio.actualSeries.length - 1;
-  let currentIndex = Math.round(ratio * lastIdx);
+  let chartWidth = isPad ? 350 : 335;
+  let chartHeight = 85;
+
+  let idx =
+    typeof mainStudio.currentIndex === "number"
+      ? mainStudio.currentIndex
+      : mainStudio.actualSeries.length - 1;
+
+  let nowRatio =
+    typeof mainStudio.nowRatio === "number" ? mainStudio.nowRatio : 1;
 
   let chartImage = buildChart(
     mainStudio.actualSeries,
     mainStudio.forecastSeries,
     chartWidth,
     chartHeight,
-    currentIndex
+    idx, // lineEndIndex (which sample = current value)
+    nowRatio // where "now" is on the X-axis (0..1)
   );
 
   let chartStack = widget.addStack();
@@ -335,7 +365,6 @@ if (mainStudio.actualSeries && mainStudio.actualSeries.length > 1) {
 }
 
 widget.addSpacer(4);
-
 
 // ---- BOTTOM ROW ----
 let bottomRow = widget.addStack();
@@ -359,7 +388,6 @@ chip.layoutHorizontally();
 chip.setPadding(3, 10, 3, 10);
 chip.cornerRadius = 999;
 chip.backgroundColor = CHIP_BG;
-chip.addSpacer(-4);
 
 let statusText = chip.addText(
   `${statusEmoji(mainStudio.currentPct)}  ${mainStudio.status}`
@@ -367,14 +395,12 @@ let statusText = chip.addText(
 statusText.font = Font.systemFont(11);
 statusText.textColor = TEXT_PRIMARY;
 
-
 // =============== AUTO REFRESH ===============
 if (config.runsInWidget && widget.refreshAfterDate) {
   let next = new Date();
   next.setMinutes(next.getMinutes() + 30);
   widget.refreshAfterDate(next);
 }
-
 
 // =============== SHOW ===============
 if (config.runsInWidget) {
