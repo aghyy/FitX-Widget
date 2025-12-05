@@ -15,7 +15,7 @@ const FITX_LOGO_URL =
 
 // =============== HELPERS ===============
 function studioNameFromUrl(url) {
-  let slug = url.split("/").filter(p => p).pop() || "Unbekannt";
+  let slug = url.split("/").filter(p => p).pop() || "Unknown";
   return slug
     .split("-")
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
@@ -43,16 +43,16 @@ function extractSeriesByAttr(html, attrName) {
   return null;
 }
 
-// Echtzeit + Prognose
+// Realtime + Forecast from attributes
 function extractSeriesPair(html) {
   const current = extractSeriesByAttr(html, "data-current-day-data");
   const visitorData = extractSeriesByAttr(html, "data-visitordata");
 
   let forecast = null;
   if (visitorData && Array.isArray(visitorData) && visitorData.length >= 7) {
-    // visitorData[0] = Mo ... [6] = So
-    const jsDay = new Date().getDay(); // 0=So..6=Sa
-    const mondayIndex = (jsDay + 6) % 7; // 0=Mo
+    // visitorData[0] = Monday ... [6] = Sunday
+    const jsDay = new Date().getDay(); // 0=Sun..6=Sat
+    const mondayIndex = (jsDay + 6) % 7; // map JS day -> 0=Monday
     forecast = visitorData[mondayIndex] || null;
   }
   if (!forecast && current) forecast = current;
@@ -61,11 +61,11 @@ function extractSeriesPair(html) {
 }
 
 function statusLabel(pct) {
-  if (pct == null || isNaN(pct)) return "Keine Daten";
-  if (pct < 25) return "Wenig besucht";
-  if (pct < 60) return "Mäßig besucht";
-  if (pct < 85) return "Gut besucht";
-  return "Sehr voll";
+  if (pct == null || isNaN(pct)) return "No data";
+  if (pct < 25) return "Not busy";
+  if (pct < 60) return "Moderately busy";
+  if (pct < 85) return "Busy";
+  return "Very busy";
 }
 
 function statusEmoji(pct) {
@@ -89,8 +89,8 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
   ctx.opaque = false;
   ctx.respectScreenScale = true;
 
-  // internal padding (tuned for smaller chart)
-  const padLeft   = 4;
+  // internal padding tuned for smaller chart
+  const padLeft   = 1;
   const padRight  = 4;
   const padTop    = 2;
   const padBottom = 14;
@@ -145,7 +145,7 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
     ctx.fillPath();
   }
 
-  // Echtzeit line (only up to currentIndex)
+  // Realtime line
   if (
     actualSeries &&
     actualSeries.length > 1 &&
@@ -167,7 +167,7 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
       ctx.strokePath();
     }
 
-    // Vertical "now" line
+    // Now-line
     let xNow = xForIndex(maxIdx, actualSeries.length);
     let nowPath = new Path();
     nowPath.move(new Point(xNow, top));
@@ -194,7 +194,7 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
 
   ctx.setTextColor(TEXT_SECONDARY);
   ctx.setFont(Font.systemFont(9));
-  ctx.drawText("Echtzeit", new Point(left + 10, legendY - 2));
+  ctx.drawText("Realtime", new Point(left + 10, legendY - 2));
 
   let forecastX = left + 65;
   let forecastDot = new Path();
@@ -206,7 +206,7 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
   ctx.addPath(forecastDot);
   ctx.setFillColor(FITX_ORANGE);
   ctx.fillPath();
-  ctx.drawText("Voraussichtliche", new Point(forecastX + 10, legendY - 2));
+  ctx.drawText("Forecast", new Point(forecastX + 10, legendY - 2));
 
   return ctx.getImage();
 }
@@ -216,7 +216,7 @@ function buildChart(actualSeries, forecastSeries, width, height, currentIndex) {
 let mainStudio = {
   name: studioNameFromUrl(STUDIO_URL),
   currentPct: null,
-  status: "Keine Daten",
+  status: "No data",
   actualSeries: null,
   forecastSeries: null
 };
@@ -238,16 +238,17 @@ try {
     mainStudio.forecastSeries = forecast;
   }
 } catch (e) {
-  mainStudio.status = "Fehler";
+  mainStudio.status = "Error";
 }
 
 
 // =============== BUILD WIDGET ===============
 let widget = new ListWidget();
 
-// Extra vertical space + slight right shift
-widget.setPadding(30, 26, 30, 20); // top, left, bottom, right
+// Vertical space + slight right shift
+widget.setPadding(30, 29, 30, 17);
 widget.backgroundColor = FITX_DARK_BG;
+
 
 // ---- HEADER ROW (logo + titles on left, percentage on right) ----
 let headerRow = widget.addStack();
@@ -277,7 +278,7 @@ headerLeft.addSpacer(8);
 let titleStack = headerLeft.addStack();
 titleStack.layoutVertically();
 
-let title = titleStack.addText("Aktuelle Auslastung");
+let title = titleStack.addText("Current Capacity");
 title.font = Font.mediumSystemFont(13);
 title.textColor = TEXT_PRIMARY;
 
@@ -292,19 +293,20 @@ let pctLabel =
   mainStudio.currentPct == null
     ? "–"
     : `${Math.round(mainStudio.currentPct)} %`;
+
 let pctText = headerRow.addText(pctLabel);
 pctText.font = Font.boldSystemFont(16);
 pctText.textColor = FITX_ORANGE;
 
 widget.addSpacer(8);
 
+
 // ---- CHART ----
 let model = Device.model();
 let isPad = model.includes("iPad");
 
-// Smaller height to allow more top/bottom padding
-let chartWidth  = isPad ? 330 : 320;
-let chartHeight = 70;
+let chartWidth  = isPad ? 350 : 335;
+let chartHeight = 85;
 
 if (mainStudio.actualSeries && mainStudio.actualSeries.length > 1) {
   let ratio = currentDayRatio();
@@ -327,22 +329,23 @@ if (mainStudio.actualSeries && mainStudio.actualSeries.length > 1) {
 
   chartStack.addSpacer();
 } else {
-  let noDataText = widget.addText("Keine Auslastungsdaten verfügbar.");
+  let noDataText = widget.addText("No capacity data available.");
   noDataText.font = Font.systemFont(11);
   noDataText.textColor = TEXT_SECONDARY;
 }
 
 widget.addSpacer(4);
 
-// ---- BOTTOM ROW (timestamp left, status chip right) ----
+
+// ---- BOTTOM ROW ----
 let bottomRow = widget.addStack();
 bottomRow.layoutHorizontally();
 bottomRow.centerAlignContent();
 
-// Timestamp on left
+// Timestamp
 let now = new Date();
 let ts = bottomRow.addText(
-  "Stand: " +
+  "Updated: " +
     now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 );
 ts.font = Font.systemFont(9);
@@ -350,12 +353,13 @@ ts.textColor = TEXT_SECONDARY;
 
 bottomRow.addSpacer();
 
-// Status chip bottom-right
+// Status chip
 let chip = bottomRow.addStack();
 chip.layoutHorizontally();
 chip.setPadding(3, 10, 3, 10);
 chip.cornerRadius = 999;
 chip.backgroundColor = CHIP_BG;
+chip.addSpacer(-4);
 
 let statusText = chip.addText(
   `${statusEmoji(mainStudio.currentPct)}  ${mainStudio.status}`
@@ -370,6 +374,7 @@ if (config.runsInWidget && widget.refreshAfterDate) {
   next.setMinutes(next.getMinutes() + 30);
   widget.refreshAfterDate(next);
 }
+
 
 // =============== SHOW ===============
 if (config.runsInWidget) {
