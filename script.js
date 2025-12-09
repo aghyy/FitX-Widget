@@ -1,26 +1,32 @@
 // =============== SETTINGS ===============
 const STUDIO_URL = "https://www.fitx.de/fitnessstudios/karlsruhe-oststadt";
 
-const FITX_ORANGE = new Color("#ff6a00");
-const FITX_DARK_BG = new Color("#101010");
-const GRID_COLOR = new Color("#333333");
-const TEXT_PRIMARY = Color.white();
+const FITX_ORANGE    = new Color("#ff6a00");
+const FITX_DARK_BG   = new Color("#101010");
+const GRID_COLOR     = new Color("#333333");
+const TEXT_PRIMARY   = Color.white();
 const TEXT_SECONDARY = new Color("#aaaaaa");
-const CHIP_BG = new Color("#222222");
 
-// Logo source
-const FITX_LOGO_URL = "https://raw.githubusercontent.com/aghyy/FitX-Widget/main/public/fitx.png";
+const COLOR_NO_DATA   = new Color("#777777");
+const COLOR_NOT_BUSY  = new Color("#2ecc71");
+const COLOR_MOD_BUSY  = new Color("#f1c40f");
+const COLOR_BUSY      = new Color("#e67e22");
+const COLOR_VERY_BUSY = new Color("#e74c3c");
+
+const NOT_BUSY        = "25";
+const MOD_BUSY        = "50";
+const BUSY            = "75";
+
+const FITX_LOGO_URL =
+  "https://raw.githubusercontent.com/aghyy/FitX-Widget/main/public/fitx.png";
+
 
 // =============== HELPERS ===============
 function studioNameFromUrl(url) {
-  let slug =
-    url
-      .split("/")
-      .filter((p) => p)
-      .pop() || "Unknown";
+  let slug = url.split("/").filter(p => p).pop() || "Unknown";
   return slug
     .split("-")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 }
 
@@ -28,7 +34,7 @@ function extractSeriesByAttr(html, attrName) {
   const patterns = [
     new RegExp(attrName + '="(\\[.*?\\])"'),
     new RegExp(attrName + "='(\\[.*?\\])'"),
-    new RegExp(attrName + "=&quot;(\\[.*?\\])&quot;"),
+    new RegExp(attrName + "=&quot;(\\[.*?\\])&quot;")
   ];
   for (let re of patterns) {
     let m = html.match(re);
@@ -58,24 +64,24 @@ function extractSeriesPair(html) {
     forecast = visitorData[mondayIndex] || null;
   }
   if (!forecast && current) forecast = current;
-
+  
   return { current, forecast };
 }
 
 function statusLabel(pct) {
   if (pct == null || isNaN(pct)) return "No data";
-  if (pct < 30) return "Not busy";
-  if (pct < 60) return "Moderately busy";
-  if (pct < 85) return "Busy";
+  if (pct < NOT_BUSY) return "Not busy";
+  if (pct < MOD_BUSY) return "Moderately busy";
+  if (pct < BUSY) return "Busy";
   return "Very busy";
 }
 
-function statusEmoji(pct) {
-  if (pct == null || isNaN(pct)) return "⚪️";
-  if (pct < 30) return "🟢";
-  if (pct < 60) return "🟡";
-  if (pct < 85) return "🟠";
-  return "🔴";
+function statusColor(pct) {
+  if (pct == null || isNaN(pct)) return COLOR_NO_DATA;
+  if (pct < NOT_BUSY) return COLOR_NOT_BUSY;
+  if (pct < MOD_BUSY) return COLOR_MOD_BUSY;
+  if (pct < BUSY) return COLOR_BUSY;
+  return COLOR_VERY_BUSY;
 }
 
 function currentDayRatio() {
@@ -87,32 +93,25 @@ function currentDayRatio() {
 // Chart builder
 // lineEndIndex = index of current realtime value (Y)
 // nowRatio     = 0..1 position of "now" along the X axis
-function buildChart(
-  actualSeries,
-  forecastSeries,
-  width,
-  height,
-  lineEndIndex,
-  nowRatio
-) {
+function buildChart(actualSeries, forecastSeries, width, height, lineEndIndex, nowRatio) {
   let ctx = new DrawContext();
   ctx.size = new Size(width, height);
   ctx.opaque = false;
   ctx.respectScreenScale = true;
 
-  const padLeft = 1;
-  const padRight = 4;
-  const padTop = 2;
+  const padLeft   = 1;
+  const padRight  = 4;
+  const padTop    = 2;
   const padBottom = 14;
 
-  const left = padLeft;
-  const right = width - padRight;
-  const top = padTop;
+  const left   = padLeft;
+  const right  = width - padRight;
+  const top    = padTop;
   const bottom = height - padBottom;
 
-  const plotWidth = right - left;
+  const plotWidth  = right - left;
   const plotHeight = bottom - top;
-  const maxVal = 100;
+  const maxVal     = 100;
 
   const clampedNowRatio = Math.max(0, Math.min(1, nowRatio));
 
@@ -138,7 +137,7 @@ function buildChart(
   // Grid
   ctx.setStrokeColor(GRID_COLOR);
   ctx.setLineWidth(1);
-  [0, 50, 100].forEach((val) => {
+  [0, 50, 100].forEach(val => {
     let y = yForValue(val);
     let p = new Path();
     p.move(new Point(left, y));
@@ -237,7 +236,7 @@ let mainStudio = {
   currentPct: null,
   status: "No data",
   actualSeries: null,
-  forecastSeries: null,
+  forecastSeries: null
 };
 
 try {
@@ -248,34 +247,36 @@ try {
   let pair = extractSeriesPair(html);
   let actual = pair.current;
   let forecast = pair.forecast;
-
+  
   if (actual && actual.length > 0) {
     let lastIdx = actual.length - 1;
-
+  
     // Index of the current realtime value.
     // Here we assume 1 value per hour starting at midnight.
     let now = new Date();
-    let hour = now.getHours(); // 0..23
+    let hour = now.getHours();           // 0..23
     let currentIndex = Math.min(lastIdx, hour);
-
+  
     let current = Number(actual[currentIndex]);
-
-    mainStudio.currentIndex = currentIndex; // index for realtime data
-    mainStudio.nowRatio = currentDayRatio(); // 0..1, for X position
-    mainStudio.currentPct = isNaN(current) ? null : current;
-    mainStudio.status = statusLabel(mainStudio.currentPct);
-    mainStudio.actualSeries = actual;
+  
+    mainStudio.currentIndex   = currentIndex;                 // index for realtime data
+    mainStudio.nowRatio       = currentDayRatio();            // 0..1, for X position
+    mainStudio.currentPct     = isNaN(current) ? null : current;
+    mainStudio.status         = statusLabel(mainStudio.currentPct);
+    mainStudio.actualSeries   = actual;
     mainStudio.forecastSeries = forecast;
   }
 } catch (e) {
   mainStudio.status = "Error";
 }
 
+
 // =============== BUILD WIDGET ===============
 let widget = new ListWidget();
 
 widget.setPadding(30, 29, 30, 17);
 widget.backgroundColor = FITX_DARK_BG;
+
 
 // ---- HEADER ROW ----
 let headerRow = widget.addStack();
@@ -326,29 +327,30 @@ pctText.textColor = FITX_ORANGE;
 
 widget.addSpacer(8);
 
+
 // ---- CHART ----
 let model = Device.model();
 let isPad = model.includes("iPad");
 
 if (mainStudio.actualSeries && mainStudio.actualSeries.length > 1) {
-  let chartWidth = isPad ? 350 : 335;
+  let chartWidth  = isPad ? 350 : 335;
   let chartHeight = 85;
 
-  let idx =
-    typeof mainStudio.currentIndex === "number"
-      ? mainStudio.currentIndex
-      : mainStudio.actualSeries.length - 1;
+  let idx = typeof mainStudio.currentIndex === "number"
+    ? mainStudio.currentIndex
+    : mainStudio.actualSeries.length - 1;
 
-  let nowRatio =
-    typeof mainStudio.nowRatio === "number" ? mainStudio.nowRatio : 1;
+  let nowRatio = typeof mainStudio.nowRatio === "number"
+    ? mainStudio.nowRatio
+    : 1;
 
   let chartImage = buildChart(
     mainStudio.actualSeries,
     mainStudio.forecastSeries,
     chartWidth,
     chartHeight,
-    idx, // lineEndIndex (which sample = current value)
-    nowRatio // where "now" is on the X-axis (0..1)
+    idx,       // lineEndIndex (which sample = current value)
+    nowRatio   // where "now" is on the X-axis (0..1)
   );
 
   let chartStack = widget.addStack();
@@ -387,13 +389,13 @@ let chip = bottomRow.addStack();
 chip.layoutHorizontally();
 chip.setPadding(3, 10, 3, 10);
 chip.cornerRadius = 999;
-chip.backgroundColor = CHIP_BG;
 
-let statusText = chip.addText(
-  `${statusEmoji(mainStudio.currentPct)}  ${mainStudio.status}`
-);
-statusText.font = Font.systemFont(11);
-statusText.textColor = TEXT_PRIMARY;
+// dynamic color based on percentage
+chip.backgroundColor = statusColor(mainStudio.currentPct);
+
+let statusText = chip.addText(mainStudio.status);
+statusText.font = Font.boldSystemFont(11);
+statusText.textColor = FITX_DARK_BG;
 
 // =============== AUTO REFRESH ===============
 if (config.runsInWidget && widget.refreshAfterDate) {
@@ -401,6 +403,7 @@ if (config.runsInWidget && widget.refreshAfterDate) {
   next.setMinutes(next.getMinutes() + 30);
   widget.refreshAfterDate(next);
 }
+
 
 // =============== SHOW ===============
 if (config.runsInWidget) {
